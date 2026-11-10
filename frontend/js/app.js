@@ -90,11 +90,34 @@ function createProductCard(product) {
     const cena = parseFloat(product.cenaBrutto) || 0;
     const imageUrl = product.zdjecie_url || 'https://via.placeholder.com/300x400?text=Brak+zdjecia';
     
-    // Generuj przyciski rozmiarów
-    console.log('Generowanie przycisków dla:', product.nazwa, 'rozmiary:', product.rozmiary);
-    const sizesHtml = product.rozmiary && product.rozmiary.length > 0 ? product.rozmiary.map(r => {
+    // --- NOWA LOGIKA SORTOWANIA ---
+    const order = { 'XS': 1, 'S': 2, 'M': 3, 'L': 4, 'XL': 5, 'XXL': 6, 'XXXL': 7 };
+
+    const sortedSizes = product.rozmiary ? [...product.rozmiary].sort((a, b) => {
+        const valA = a.rozmiar.toUpperCase();
+        const valB = b.rozmiar.toUpperCase();
+        
+        // Jeśli oba rozmiary są w naszym słowniku wag (XS-XXL)
+        if (order[valA] && order[valB]) {
+            return order[valA] - order[valB];
+        }
+        
+        // Jeśli to rozmiary liczbowe (np. 36, 38)
+        const numA = parseInt(valA);
+        const numB = parseInt(valB);
+        if (!isNaN(numA) && !isNaN(numB)) {
+            return numA - numB;
+        }
+
+        // Domyślnie alfabetycznie
+        return valA.localeCompare(valB);
+    }) : [];
+    // --- KONIEC SORTOWANIA ---
+
+    // Generuj przyciski rozmiarów z POSORTOWANEJ listy
+    console.log('Generowanie przycisków dla:', product.nazwa, 'rozmiary:', sortedSizes);
+    const sizesHtml = sortedSizes.length > 0 ? sortedSizes.map(r => {
         const isAvailable = r.stanMagazynowy > 0;
-        console.log('  Rozmiar:', r.rozmiar, 'stan:', r.stanMagazynowy, 'available:', isAvailable);
         return `<button class="size-btn ${isAvailable ? '' : 'size-unavailable'}" 
                         data-rozmiar="${r.rozmiar}" 
                         data-stan="${r.stanMagazynowy}"
@@ -103,7 +126,6 @@ function createProductCard(product) {
                     ${r.rozmiar}
                 </button>`;
     }).join('') : '';
-    console.log('sizesHtml:', sizesHtml);
     
     return `
         <div class="product-card" data-id="${product.id_produkt}">
@@ -171,15 +193,24 @@ async function handleAddToCart(produktId, ilosc = 1, rozmiar = null) {
     }
     
     try {
-        // Jeśli podano rozmiar, użyj zmodyfikowanej funkcji
+        let result; // Tworzymy zmienną na dane z serwera
+
+        // Wywołujemy API i zapisujemy odpowiedź do 'result'
         if (rozmiar) {
-            const result = await addToCartWithSize(produktId, ilosc, rozmiar);
-            showToast('Dodano do koszyka!', 'success');
+            result = await addToCartWithSize(produktId, ilosc, rozmiar);
         } else {
-            await addToCart(produktId, ilosc);
-            showToast('Dodano do koszyka!', 'success');
+            result = await addToCart(produktId, ilosc);
         }
-        updateCartCount();
+
+        // Jeśli udało się dodać:
+        showToast('Dodano do koszyka!', 'success');
+        updateCartCount(); // To aktualizuje cyferkę na przycisku
+
+        // WYWOŁANIE PODGLĄDU (to okienko pod nagłówkiem)
+        if (result) {
+            showCartDropdownPreview(result);
+        }
+
     } catch (error) {
         showToast(error.message || 'Nie udało się dodać do koszyka', 'error');
     }
@@ -380,15 +411,22 @@ async function removeFromCart(pozycjaId) {
 }
 
 // Pokaż formularz checkout
-function showCheckout() {
+
+window.showCheckout = function() {
     const cartModal = document.getElementById('cartModal');
     const checkoutModal = document.getElementById('checkoutModal');
     
-    if (cartModal) cartModal.classList.remove('active');
-    if (checkoutModal) checkoutModal.classList.add('active');
+    if (cartModal) {
+        cartModal.classList.remove('active');
+        cartModal.style.display = 'none'; // Zamykamy okno koszyka
+    }
+    if (checkoutModal) {
+        checkoutModal.classList.add('active');
+        checkoutModal.style.display = 'flex'; // Otwieramy okno dostawy
+    }
 }
-
 // Obsługa checkout
+
 async function handleCheckout(e) {
     e.preventDefault();
     
@@ -409,22 +447,33 @@ async function handleCheckout(e) {
     
     try {
         console.log('handleCheckout - wysyłam checkout...');
-        const order = await checkout(adres);
-        console.log('handleCheckout - order:', order);
-        showToast('Zamówienie złożone!', 'success');
         
-        // Zamknij modal
+        // Odbieramy całą odpowiedź z backendu (zamówienie + checkout_url)
+        const response = await checkout(adres); 
+        console.log('handleCheckout - response:', response);
+        
+        // Zamknij okienko z formularzem adresu
         const modal = document.getElementById('checkoutModal');
         if (modal) modal.classList.remove('active');
         
         // Wyczyść formularz
         document.getElementById('checkoutForm')?.reset();
         
-        // Aktualizuj koszyk
+        // Zaktualizuj licznik koszyka (teraz na backendzie został wyczyszczony)
         updateCartCount();
         
-        // Pokaż potwierdzenie
-        showOrderConfirmation(order);
+        // --- KLUCZOWY MOMENT: PRZEKIEROWANIE DO STRIPE ---
+        if (response.checkout_url) {
+            showToast('Przekierowywanie do bezpiecznej płatności...', 'info');
+            // Ta komenda każe przeglądarce załadować nową stronę:
+            window.location.href = response.checkout_url; 
+        } else {
+            // Jeśli z jakiegoś powodu Stripe nie zwrócił linku
+            showToast('Zamówienie złożone, opłać przy odbiorze.', 'success');
+            // Zwracamy okienko potwierdzenia (response.zamowienie bo zmieniliśmy to w Pythonie)
+            showOrderConfirmation(response.zamowienie || response); 
+        }
+        
     } catch (error) {
         showToast(error.message || 'Nie udało się złożyć zamówienia', 'error');
     }
@@ -437,15 +486,18 @@ function showOrderConfirmation(order) {
     
     if (!content || !modal) return;
     
+    const kwota = parseFloat(order.kwota || 0);
+    
     content.innerHTML = `
         <h2>Dziękujemy za zamówienie!</h2>
         <p>Numer zamówienia: <strong>#${order.id_zamowienie}</strong></p>
-        <p>Kwota: <strong>${order.kwota.toFixed(2)} zł</strong></p>
+        <p>Kwota: <strong>${kwota.toFixed(2)} zł</strong></p>
         <p>Status: <span class="status-${order.status}">${order.status}</span></p>
         <p>Data: ${new Date(order.dataZlozenia).toLocaleString('pl-PL')}</p>
         <button class="btn btn-primary" onclick="closeModals()">Zamknij</button>
     `;
     
+    modal.style.display = '';
     modal.classList.add('active');
 }
 
@@ -502,6 +554,11 @@ async function showOrderHistory(statusFilter = '') {
                             </div>
                             <div class="order-details">
                                 <p>Kwota: ${parseFloat(order.kwota || 0).toFixed(2)} zł</p>
+                                ${order.status === 'oczekujące' ? `
+                                    <button class="btn btn-sm btn-danger" onclick="handleCancelOrder(${order.id_zamowienie})" style="margin-top: 0.5rem; background-color: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 5px; cursor: pointer;">
+                                        Anuluj zamówienie
+                                    </button>
+                                ` : ''}
                                 ${order.status === 'zakończone' && !order.czy_zwrot_zgloszony ? `
                                     <button class="btn btn-sm btn-secondary" onclick="showReturnModal(${order.id_zamowienie})" style="margin-top: 0.5rem;">
                                         Zwróć produkt
@@ -527,10 +584,28 @@ async function showOrderHistory(statusFilter = '') {
         });
         
         console.log('showOrderHistory - dodaję klasę active');
+        modal.style.display = '';
         modal.classList.add('active');
     } catch (error) {
         console.error('showOrderHistory - błąd:', error);
         showToast('Nie udało się pobrać historii zamówień', 'error');
+    }
+}
+
+// Anulowanie zamówienia przez kupującego
+async function handleCancelOrder(orderId) {
+    if (!confirm(`Czy na pewno chcesz anulować zamówienie #${orderId}?`)) {
+        return;
+    }
+    try {
+        await apiRequest(`/zamowienia/${orderId}/anuluj/`, {
+            method: 'POST',
+        });
+        showToast('Zamówienie zostało anulowane', 'success');
+        showOrderHistory(currentOrderFilter); // Odśwież listę zamówień
+        loadProducts(); // Odśwież stany magazynowe na stronie
+    } catch (error) {
+        showToast(error.message || 'Nie udało się anulować zamówienia', 'error');
     }
 }
 
@@ -663,41 +738,47 @@ async function showProductDetail(produktId) {
                     ` : '<button class="btn btn-disabled" disabled>Brak w magazynie</button>'}
                     
                     <!-- Sekcja opinii -->
-                    <div class="opinions-section" style="margin-top: 2rem; border-top: 2px solid #eee; padding-top: 1.5rem;">
+<div class="opinions-section" style="margin-top: 2rem; border-top: 2px solid #eee; padding-top: 1.5rem;">
                         <h3 style="margin-bottom: 1rem;">Opinie o produkcie</h3>
-                        ${getAuthToken() ? `
-                            <div class="add-opinion-form" style="background: #f5f5f5; padding: 1rem; border-radius: 10px; margin-bottom: 1.5rem;">
-                                <h4>Dodaj opinię</h4>
-                                <div class="form-group" style="margin-bottom: 0.5rem;">
-                                    <label>Ocena</label>
-                                    <select id="opinionRating" style="width: 100%; padding: 0.5rem;">
-                                        <option value="5">⭐⭐⭐⭐⭐ - 5</option>
-                                        <option value="4">⭐⭐⭐⭐ - 4</option>
-                                        <option value="3">⭐⭐⭐ - 3</option>
-                                        <option value="2">⭐⭐ - 2</option>
-                                        <option value="1">⭐ - 1</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label>Komentarz</label>
-                                    <textarea id="opinionComment" rows="3" style="width: 100%; padding: 0.5rem;" placeholder="Napisz swoją opinię..."></textarea>
-                                </div>
-                                <button class="btn btn-primary" onclick="addOpinion(${product.id_produkt})">Dodaj opinię</button>
-                            </div>
-                        ` : '<p style="color: #666; margin-bottom: 1rem;">Zaloguj się, aby dodać opinię</p>'}
                         
-                        <div class="opinions-list" id="opinionsList-${product.id_produkt}">
-                            ${opinie.length > 0 ? opinie.map(opinia => `
-                                <div class="opinion-item" style="background: #f9f9f9; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-                                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                        <strong>${opinia.uzytkownik_imie} ${opinia.uzytkownik_nazwisko?.charAt(0)}.</strong>
-                                        <span>${new Date(opinia.data).toLocaleDateString('pl-PL')}</span>
+                        <div class="opinions-scroll-container">
+                            
+                            ${getAuthToken() ? `
+                                <div class="add-opinion-form" style="background: #f5f5f5; padding: 1rem; border-radius: 10px; margin-bottom: 1.5rem;">
+                                    <h4>Dodaj opinię</h4>
+                                    <div class="form-group" style="margin-bottom: 0.5rem;">
+                                        <label>Ocena</label>
+                                        <select id="opinionRating" style="width: 100%; padding: 0.5rem;">
+                                            <option value="5">⭐⭐⭐⭐⭐ - 5</option>
+                                            <option value="4">⭐⭐⭐⭐ - 4</option>
+                                            <option value="3">⭐⭐⭐ - 3</option>
+                                            <option value="2">⭐⭐ - 2</option>
+                                            <option value="1">⭐ - 1</option>
+                                        </select>
                                     </div>
-                                    <div style="margin-bottom: 0.5rem;">${'⭐'.repeat(opinia.ocena)}</div>
-                                    <p style="color: #555;">${opinia.komentarz || 'Brak komentarza'}</p>
+                                    <div class="form-group">
+                                        <label>Komentarz</label>
+                                        <textarea id="opinionComment" rows="3" style="width: 100%; padding: 0.5rem;" placeholder="Napisz swoją opinię..."></textarea>
+                                    </div>
+                                    <button class="btn btn-primary" onclick="addOpinion(${product.id_produkt})">Dodaj opinię</button>
                                 </div>
-                            `).join('') : '<p style="color: #999;">Brak opinii o tym produkcie</p>'}
-                        </div>
+                            ` : '<p style="color: #666; margin-bottom: 1rem;">Zaloguj się, aby dodać opinię</p>'}
+                            
+                            <div class="opinions-list" id="opinionsList-${product.id_produkt}">
+                                ${opinie.length > 0 ? opinie.map(opinia => `
+                                    <div class="opinion-item" style="background: #f9f9f9; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+                                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                            <strong>${opinia.uzytkownik_imie} ${opinia.uzytkownik_nazwisko?.charAt(0)}.</strong>
+                                            <span>${new Date(opinia.data).toLocaleDateString('pl-PL')}</span>
+                                        </div>
+                                        <div style="margin-bottom: 0.5rem;">${'⭐'.repeat(opinia.ocena)}</div>
+                                        <p style="color: #555;">${opinia.komentarz || 'Brak komentarza'}</p>
+                                    </div>
+                                `).join('') : '<p style="color: #999;">Brak opinii o tym produkcie</p>'}
+                            </div>
+                        
+                        </div> 
+                        
                     </div>
                 </div>
             </div>
@@ -763,7 +844,7 @@ async function addToCartFromDetail(produktId) {
     await handleAddToCart(produktId, ilosc, rozmiar);
 }
 
-// Inicjalizacja przycisków koszyka i zamówień
+// Inicjalizacja przycisków koszyka, zamówień i formularzy
 document.addEventListener('DOMContentLoaded', () => {
     const cartBtn = document.getElementById('cartBtn');
     if (cartBtn) {
@@ -772,7 +853,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const ordersBtn = document.getElementById('ordersBtn');
     if (ordersBtn) {
-        ordersBtn.addEventListener('click', showOrderHistory);
+        ordersBtn.addEventListener('click', () => showOrderHistory(''));
     }
     
     const checkoutForm = document.getElementById('checkoutForm');
@@ -785,7 +866,7 @@ document.addEventListener('DOMContentLoaded', () => {
         returnForm.addEventListener('submit', handleReturn);
     }
     
-    // Obsługa filtrów zamówień
+    // Obsługa filtrów zamówień (POPRAWNIE ZAMKNIĘTA PĘTLA)
     document.querySelectorAll('.order-filters .filter-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -793,4 +874,63 @@ document.addEventListener('DOMContentLoaded', () => {
             showOrderHistory(status);
         });
     });
+
+    // Obsługa zmiany hasła (WYCIĄGNIĘTA POZA FILTRY)
+    const changePasswordForm = document.getElementById('changePasswordForm');
+    if (changePasswordForm) {
+        changePasswordForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const oldPassword = document.getElementById('oldPassword').value;
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmNewPassword = document.getElementById('confirmNewPassword').value;
+
+            if (newPassword !== confirmNewPassword) {
+                showToast('Hasła nie są identyczne!', 'error');
+                return;
+            }
+
+            try {
+                await changePassword(oldPassword, newPassword);
+                showToast('Hasło zostało pomyślnie zmienione!', 'success');
+                changePasswordForm.reset();
+            } catch (error) {
+                showToast('Błąd: ' + error.message, 'error');
+            }
+        });
+    }
 });
+
+function showCartDropdownPreview(cartData) {
+    const dropdown = document.getElementById('cartDropdown');
+    const container = document.getElementById('cartDropdownItems');
+    const totalEl = document.getElementById('cartDropdownTotal');
+
+    if (!dropdown || !container) return;
+
+    container.innerHTML = '';
+    const pozycje = cartData.pozycje || [];
+    const recentItems = [...pozycje].reverse().slice(0, 3);
+
+    recentItems.forEach(item => {
+        const itemTotal = (parseFloat(item.cenaJednostkowa || 0) * item.ilosc).toFixed(2);
+        container.innerHTML += `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0;">
+                <div style="text-align: left;">
+                    <div style="font-weight: bold; font-size: 14px; color: #1a1a1a;">${item.produkt_nazwa || 'Produkt'}</div>
+                    <div style="font-size: 12px; color: #888;">Rozmiar: ${item.rozmiar || '—'} | Ilość: ${item.ilosc}</div>
+                </div>
+                <div style="font-weight: bold; color: #000; font-size: 14px;">${itemTotal} zł</div>
+            </div>
+        `;
+    });
+
+    const totalSuma = pozycje.reduce((acc, curr) => acc + (parseFloat(curr.cenaJednostkowa || 0) * curr.ilosc), 0);
+    if (totalEl) totalEl.innerText = totalSuma.toFixed(2) + ' zł';
+
+    dropdown.style.display = 'block';
+
+    clearTimeout(window.cartDropdownTimeout);
+    window.cartDropdownTimeout = setTimeout(() => {
+        dropdown.style.display = 'none';
+    }, 4000);
+}

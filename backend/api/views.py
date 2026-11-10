@@ -1,7 +1,12 @@
+import stripe
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from rest_framework import generics, status, viewsets
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser, BasePermission
 from rest_framework.decorators import action
+from rest_framework.views import APIView
+from django.contrib.auth import update_session_auth_hash
 
 
 class IsAuthenticatedOrReadOnly(BasePermission):
@@ -15,9 +20,14 @@ class IsAuthenticatedOrReadOnly(BasePermission):
         return request.user and request.user.is_authenticated
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
+from django.core.mail import send_mail
+from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.db import transaction
+from django.db import transaction, connection, DatabaseError
 from .serializers import (
     RegisterSerializer, UserSerializer, ProduktSerializer, 
     KoszykSerializer, PozycjaKoszykaSerializer, 
@@ -29,8 +39,182 @@ from .models import (
     PozycjaZamowienia, AdresDostawy, Opinia, 
     Platnosc, Zwrot, RozmiarProduktu
 )
+import os
+import json
+from datetime import datetime
+from django.db import connections
 
 User = get_user_model()
+
+
+class HealthCheckView(APIView):
+    """
+    Endpoint Health Check do monitoringu stanu systemu.
+    
+    Zwraca informacje o:
+    - Statusie połączenia z bazą danych
+    - Statusie replikacji MySQL
+    - Czasie od ostatniego backupu
+    - Opóźnieniu replikacji
+    
+    GET /api/health/
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        from django.db import connections
+        
+        result = {
+            'status': 'unknown',
+            'database': {
+                'master': {'connected': False, 'error': None},
+                'slave': {'connected': False, 'error': None}
+            },
+            'replication': {
+                'status': 'unknown',
+                'lag_seconds': None,
+                'error': None
+            },
+            'backup': {
+                'last_backup': None,
+                'next_scheduled': '02:00 UTC'
+            },
+            'timestamp': datetime.now().isoformat() + 'Z'
+        }
+        
+        # Sprawdź połączenie z masterem
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+            result['database']['master']['connected'] = True
+        except DatabaseError as e:
+            result['database']['master']['error'] = str(e)
+        except Exception as e:
+            result['database']['master']['error'] = str(e)
+        
+        # Sprawdź połączenie z slave'em
+        if 'slave' in settings.DATABASES:
+            try:
+                slave_connection = connections['slave']
+                with slave_connection.cursor() as cursor:
+                    cursor.execute("SELECT 1")
+                result['database']['slave']['connected'] = True
+            except DatabaseError as e:
+                result['database']['slave']['error'] = str(e)
+            except Exception as e:
+                result['database']['slave']['error'] = str(e)
+        
+        # Sprawdź status replikacji (tylko jeśli slave jest połączony)
+        if result['database']['slave']['connected']:
+            try:
+                slave_connection = connections['slave']
+                with slave_connection.cursor() as cursor:
+                    cursor.execute("SHOW SLAVE STATUS")
+                    slave_status = cursor.fetchone()
+                    row = cursor.fetchone()
+                    
+                    if slave_status:
+                        columns = [desc[0] for desc in cursor.description]
+                        status_dict = dict(zip(columns, slave_status))
+                        
+                        io_running = status_dict.get('Replica_IO_Running') or status_dict.get('Slave_IO_Running')
+                        sql_running = status_dict.get('Replica_SQL_Running') or status_dict.get('Slave_SQL_Running')
+                        
+                        if io_running == 'Yes' and sql_running == 'Yes':
+                            result['replication']['status'] = 'active'
+                            seconds_behind = status_dict.get('Seconds_Behind_Master')
+                            if seconds_behind is not None:
+                                result['replication']['lag_seconds'] = int(seconds_behind)
+                        else:
+                            result['replication']['status'] = 'inactive'
+                            result['replication']['error'] = f"IO: {io_running}, SQL: {sql_running}"
+                    else:
+                        result['replication']['status'] = 'not_configured'
+            except Exception as e:
+                result['replication']['error'] = str(e)
+        
+        # Sprawdź ostatni backup
+        backup_dir = '/home/cortexai/CortexAI/moj_projekt/backend/backups'
+        try:
+            backup_files = [f for f in os.listdir(backup_dir) if f.startswith('backup_') and f.endswith('.sql.gz')]
+            if backup_files:
+                latest_backup = sorted(backup_files)[-1]
+                backup_path = os.path.join(backup_dir, latest_backup)
+                mtime = os.path.getmtime(backup_path)
+                last_backup_time = datetime.fromtimestamp(mtime).isoformat()
+                result['backup']['last_backup'] = last_backup_time
+            else:
+                result['backup']['last_backup'] = None
+        except Exception as e:
+            result['backup']['error'] = str(e)
+        
+        # Określ ogólny status systemu
+        if result['database']['master']['connected']:
+            if result['database']['slave']['connected'] and result['replication']['status'] == 'active':
+                result['status'] = 'healthy'
+            else:
+                result['status'] = 'degraded'
+        else:
+            result['status'] = 'unhealthy'
+        
+        return Response(result, status=200 if result['status'] == 'healthy' else 503)
+
+
+class PasswordResetRequestView(APIView):
+    """Wysyła link do resetowania hasła na podany adres e-mail."""
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        email = request.data.get('email')
+        if not email:
+            return Response({"detail": "E-mail jest wymagany."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        user = User.objects.filter(email=email).first()
+        if user:
+            token = default_token_generator.make_token(user)
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            
+            # W środowisku produkcyjnym link powinien prowadzić do frontendu
+            frontend_url = f"http://localhost:8000/reset-password.html?uid={uid}&token={token}"
+            # W środowisku produkcyjnym zastąp localhost:5500 przez domenę frontendu (np. 'https://narejonie.com.pl')
+            # frontend_url = f"https://narejonie.com.pl/reset-password.html?uid={uid}&token={token}"
+            
+            send_mail(
+                subject='Resetowanie hasła - NaRejonie',
+                message=f'Kliknij w poniższy link, aby zresetować hasło:\n{frontend_url}',
+                from_email=settings.DEFAULT_FROM_EMAIL, # Bezpieczniejsze, bierze prosto z settings
+                recipient_list=[user.email],
+                fail_silently=False,
+)
+            
+        # Zawsze zwracamy 200 OK ze względów bezpieczeństwa (zapobiega to enumeracji użytkowników)
+        return Response({"detail": "Jeśli podany e-mail istnieje w bazie, wysłano na niego link do resetu hasła."}, status=status.HTTP_200_OK)
+
+
+class PasswordResetConfirmView(APIView):
+    """Ustawia nowe hasło na podstawie poprawnego tokenu."""
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        uidb64 = request.data.get('uid')
+        token = request.data.get('token')
+        new_password = request.data.get('password')
+
+        if not uidb64 or not token or not new_password:
+            return Response({"detail": "Brakujące dane."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = User.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            user = None
+
+        if user is not None and default_token_generator.check_token(user, token):
+            user.set_password(new_password)
+            user.save()
+            return Response({"detail": "Hasło zostało pomyślnie zresetowane."}, status=status.HTTP_200_OK)
+        else:
+            return Response({"detail": "Link do resetu hasła jest nieprawidłowy lub wygasł."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -67,13 +251,6 @@ class ProfileView(generics.RetrieveUpdateAPIView):
 
 
 class ProduktViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet dla produktów.
-    - GET: Lista produktów (filtrowanie po kategorii, kolorze, cenie)
-    - POST: Dodawanie produktu (tylko admin)
-    - PUT/PATCH: Edycja produktu (tylko admin)
-    - DELETE: Usuwanie produktu (tylko admin)
-    """
     queryset = Produkt.objects.all()
     serializer_class = ProduktSerializer
     
@@ -83,8 +260,28 @@ class ProduktViewSet(viewsets.ModelViewSet):
         return [AllowAny()]
     
     def get_queryset(self):
-        queryset = Produkt.objects.all()
+        from api.routers import ResilienceRouter
         
+        db_target = 'default' if ResilienceRouter.simulate_slave_down else 'slave'
+
+        try:
+            # Testowe zapytanie
+            queryset = Produkt.objects.using(db_target).all()
+            list(queryset[:1]) 
+            
+            if db_target == 'slave':
+                ResilienceRouter.log_query('SLAVE (Replika odczyt)', 'READ')
+            else:
+                ResilienceRouter.log_query('MASTER (Fallback odczyt)', 'READ')
+                
+        except Exception as e:
+            # WYŚWIETL DOKŁADNY BŁĄD W KONSOLI PYTHON!
+            print(f"❌ [DEBUG BLĘDU SLAVE] Nie udało się odczytać ze slave z powodu: {e}")
+            
+            db_target = 'default'
+            queryset = Produkt.objects.using(db_target).all()
+            ResilienceRouter.log_query('MASTER (Awaryjny odczyt)', 'READ')
+
         # Filtrowanie po kategorii
         kategoria = self.request.query_params.get('kategoria')
         if kategoria:
@@ -114,8 +311,6 @@ class ProduktViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(nazwa__icontains=search)
         
         return queryset
-
-
 class KoszykViewSet(viewsets.ViewSet):
     """
     ViewSet dla koszyka zakupowego.
@@ -291,12 +486,7 @@ class ZamowienieViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def checkout(self, request):
         """
-        Złożenie zamówienia (Transakcja ACID).
-        - Sprawdzenie stanu magazynowego (Race Condition prevention)
-        - Przepisanie produktów z koszyka
-        - Zamrożenie cen
-        - Zmniejszenie stanu magazynowego
-        - Wyczyszczenie koszyka
+        Złożenie zamówienia i wygenerowanie linku do płatności Stripe.
         """
         koszyk = get_object_or_404(Koszyk, id_uzytkownik=request.user)
         pozycje_koszyka = koszyk.pozycje.all()
@@ -322,73 +512,112 @@ class ZamowienieViewSet(viewsets.ModelViewSet):
             )
         
         try:
+            line_items = []
+            
             with transaction.atomic():
                 kwota_calkowita = 0
                 
-                # Najpierw sprawdź i zablokuj wszystkie produkty
+                # 1. Wstępne sprawdzenie dostępności (bez odejmowania!)
                 for pozycja in pozycje_koszyka:
-                    produkt = Produkt.objects.select_for_update().get(
-                        id_produkt=pozycja.id_produkt_id
-                    )
-                    # Oblicz całkowity stan ze wszystkich rozmiarów
-                    total_stock = sum(r.stanMagazynowy for r in produkt.rozmiary.select_for_update().all())
-                    if total_stock < pozycja.ilosc:
+                    # Szukamy konkretnego rozmiaru wybranego przez klienta
+                    rozmiar_obj = RozmiarProduktu.objects.filter(
+                        id_produkt=pozycja.id_produkt, 
+                        rozmiar=pozycja.rozmiar
+                    ).first()
+
+                    if not rozmiar_obj or rozmiar_obj.stanMagazynowy < pozycja.ilosc:
                         raise ValueError(
-                            f"Niewystarczająca ilość produktu: {produkt.nazwa}"
+                            f"Niewystarczająca ilość produktu: {pozycja.id_produkt.nazwa} (rozmiar {pozycja.rozmiar})"
                         )
                     
                     kwota_calkowita += pozycja.ilosc * pozycja.cenaJednostkowa
                 
-                # Utwórz zamówienie
+                # 2. Utwórz zamówienie
                 zamowienie = Zamowienie.objects.create(
                     id_uzytkownik=request.user,
                     status='oczekujące',
                     kwota=kwota_calkowita
                 )
                 
-                # Zapisz adres dostawy
                 adres_serializer.save(id_zamowienie=zamowienie)
                 
-                # Przepisz pozycje z koszyka do zamówienia
+                # 3. Przepisanie pozycji - KLUCZOWA ZMIANA: zapisujemy rozmiar!
                 for pozycja in pozycje_koszyka:
                     PozycjaZamowienia.objects.create(
                         id_zamowienie=zamowienie,
                         id_produkt=pozycja.id_produkt,
+                        rozmiar=pozycja.rozmiar,
                         ilosc=pozycja.ilosc,
                         cenaJednostkowa=pozycja.cenaJednostkowa
                     )
                     
-                    # Zmniejsz stan magazynowy - odejmij od pierwszego dostępnego rozmiaru
-                    produkt = pozycja.id_produkt
-                    ilosc_do_odjecia = pozycja.ilosc
-                    for rozmiar in produkt.rozmiary.select_for_update().all():
-                        if ilosc_do_odjecia <= 0:
-                            break
-                        if rozmiar.stanMagazynowy > 0:
-                            if rozmiar.stanMagazynowy >= ilosc_do_odjecia:
-                                rozmiar.stanMagazynowy -= ilosc_do_odjecia
-                                rozmiar.save()
-                                ilosc_do_odjecia = 0
-                            else:
-                                ilosc_do_odjecia -= rozmiar.stanMagazynowy
-                                rozmiar.stanMagazynowy = 0
-                                rozmiar.save()
+                    # Odejmij zakupioną ilość z magazynu dla wybranego rozmiaru
+                    wariant = RozmiarProduktu.objects.select_for_update().filter(
+                        id_produkt=pozycja.id_produkt,
+                        rozmiar=pozycja.rozmiar
+                    ).first()
+                    if wariant:
+                        wariant.stanMagazynowy -= pozycja.ilosc
+                        wariant.save()
+                    
+                    # Przygotowanie danych dla Stripe
+                    line_items.append({
+                        'price_data': {
+                            'currency': 'pln',
+                            'product_data': {
+                                'name': f"{pozycja.id_produkt.nazwa} (Rozmiar: {pozycja.rozmiar})",
+                            },
+                            'unit_amount': int(pozycja.cenaJednostkowa * 100), 
+                        },
+                        'quantity': pozycja.ilosc,
+                    })
                 
-                # Wyczyść koszyk
+                # 4. Czyścimy koszyk (użytkownik przeszedł do płatności)
                 pozycje_koszyka.delete()
-                
+
+            # 4. Czyścimy koszyk (użytkownik przeszedł do płatności)
+                pozycje_koszyka.delete()
+
+            # --- INTEGRACJA Z BRAMKĄ STRIPE ---
+            checkout_url = None
+            if getattr(settings, 'STRIPE_SECRET_KEY', None):
+                try:
+                    domain_url = f"{request.scheme}://{request.get_host()}"
+                    
+                    checkout_session = stripe.checkout.Session.create(
+                        line_items=line_items,
+                        mode='payment',
+                        success_url=domain_url + '/index.html?payment=success',
+                        cancel_url=domain_url + '/index.html?payment=cancelled',
+                        client_reference_id=str(zamowienie.id_zamowienie),
+                        customer_email=request.user.email,
+                    )
+                    checkout_url = checkout_session.url
+                except Exception as stripe_err:
+                    print(f"Ostrzeżenie Stripe (zamówienie zapisane bez płatności online): {stripe_err}")
+
         except ValueError as e:
             return Response(
                 {"detail": str(e)}, 
                 status=status.HTTP_409_CONFLICT
             )
+        except Exception as e:
+            return Response(
+                {"detail": f"Błąd podczas składania zamówienia: {str(e)}"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
         
         serializer = self.get_serializer(zamowienie)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
+        # ZWRACAMY ZAMÓWIENIE I EWENTUALNY LINK DO PŁATNOŚCI
+        return Response({
+            'zamowienie': serializer.data,
+            'checkout_url': checkout_url
+        }, status=status.HTTP_201_CREATED)
     
     @action(detail=True, methods=['post'])
     def anuluj(self, request, pk=None):
-        """Anuluj zamówienie (tylko jeśli jest w statusie 'oczekujące')."""
+        """Anuluj zamówienie (tylko jeśli jest w statusie 'oczekujące') i zwróć towar na magazyn."""
         zamowienie = self.get_object()
         
         # Sprawdź czy użytkownik ma prawo anulować
@@ -404,13 +633,22 @@ class ZamowienieViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        zamowienie.status = 'anulowane'
-        zamowienie.save()
+        with transaction.atomic():
+            zamowienie.status = 'anulowane'
+            zamowienie.save()
+            
+            # ZWRÓĆ ZAMÓWIONE SZTUKI Z POWROTEM NA STAN MAGAZYNOWY
+            for pozycja in zamowienie.pozycje.all():
+                wariant = RozmiarProduktu.objects.select_for_update().filter(
+                    id_produkt=pozycja.id_produkt,
+                    rozmiar=pozycja.rozmiar
+                ).first()
+                if wariant:
+                    wariant.stanMagazynowy += pozycja.ilosc
+                    wariant.save()
         
         serializer = self.get_serializer(zamowienie)
         return Response(serializer.data)
-
-
 class ZamowienieAdminViewSet(viewsets.ViewSet):
     """
     ViewSet dla administratora do zarządzania zamówieniami.
@@ -451,16 +689,15 @@ class OpiniaViewSet(viewsets.ModelViewSet):
     queryset = Opinia.objects.all()
     serializer_class = OpiniaSerializer
     permission_classes = (IsAuthenticatedOrReadOnly,)
-    
+
+        # Pobieramy ID produktu  
     def get_queryset(self):
-        queryset = Opinia.objects.all()
-        
-        # Filtrowanie po produkcie
         id_produkt = self.request.query_params.get('id_produkt')
-        if id_produkt:
-            queryset = queryset.filter(id_produkt=id_produkt)
         
-        return queryset
+        if id_produkt:
+            return Opinia.objects.filter(id_produkt=id_produkt)
+        
+        return Opinia.objects.none()
     
     def perform_create(self, serializer):
         serializer.save(id_uzytkownik=self.request.user)
@@ -595,7 +832,23 @@ class UserAdminViewSet(viewsets.ModelViewSet):
         user.statusUzytkownika = 'aktywny'
         user.save()
         return Response({'detail': 'Użytkownik odblokowany'})
-
+    
+    @action(detail=True, methods=['post'])
+    def usun(self, request, pk=None):
+        """Miękkie usuwanie użytkownika (zmiana statusu)."""
+        user = get_object_or_404(User, id=pk)
+        
+        if user == request.user:
+            return Response(
+                {'detail': 'Nie możesz usunąć własnego konta administratora.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        user.statusUzytkownika = 'usunięty'
+        user.is_active = False # Blokuje całkowicie możliwość logowania w Django
+        user.save()
+        
+        return Response({'detail': 'Użytkownik oznaczony jako usunięty'})
 
 class OpiniaAdminViewSet(viewsets.ModelViewSet):
     """
@@ -626,3 +879,128 @@ class OpiniaAdminViewSet(viewsets.ModelViewSet):
         opinia = get_object_or_404(Opinia, id_opinia=pk)
         opinia.delete()
         return Response({'detail': 'Opinia usunięta'})
+    
+class PasswordChangeView(APIView):
+    permission_classes = [IsAuthenticated] # Tylko zalogowani mogą zmieniać hasło
+
+    def post(self, request):
+        user = request.user
+        old_password = request.data.get("old_password")
+        new_password = request.data.get("new_password")
+
+        # 1. Sprawdź czy stare hasło jest poprawne
+        if not user.check_password(old_password):
+            return Response(
+                {"detail": "Obecne hasło jest nieprawidłowe."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 2. Ustaw nowe hasło (Django automatycznie je zahaszuje)
+        user.set_password(new_password)
+        user.save()
+
+        # 3. Ważne: aktualizacja sesji, aby użytkownik nie został wylogowany
+        update_session_auth_hash(request, user)
+
+        return Response(
+            {"detail": "Hasło zostało pomyślnie zmienione."}, 
+            status=status.HTTP_200_OK)
+
+from django.views.decorators.csrf import csrf_exempt
+from django.http import HttpResponse
+import os
+import stripe
+from .models import Zamowienie, RozmiarProduktu
+
+@csrf_exempt
+def stripe_webhook(request):
+    payload = request.body
+    sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
+    endpoint_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+    except Exception:
+        return HttpResponse(status=400)
+
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+        zamowienie_id = session.client_reference_id
+
+        if zamowienie_id:
+            try:
+                with transaction.atomic():
+                    zamowienie = Zamowienie.objects.get(id_zamowienie=zamowienie_id)
+                    if zamowienie.status == 'oczekujące':
+                        zamowienie.status = 'w realizacji'
+                        zamowienie.save()
+
+            except Zamowienie.DoesNotExist:
+                pass
+            except Exception as e:
+                print(f"Błąd Webhooka: {e}")
+
+    return HttpResponse(status=200)
+
+class MonitoringView(APIView):
+    """
+    View dla dashboardu monitoringowego.
+    """
+    permission_classes = [IsAdminUser]
+    
+    def get(self, request):
+        return render(request, 'monitoring.html')
+
+
+from django.shortcuts import render
+from api.routers import ResilienceRouter
+
+def database_monitoring_view(request):
+    """
+    Widok panelu monitorowania stanu baz danych i replikacji w czasie rzeczywistym.
+    """
+    db_status = ResilienceRouter.get_database_status()
+    
+    context = {
+        'db_status': db_status,
+    }
+    return render(request, 'api/monitoring.html', context)
+
+
+def custom_admin_view(request):
+    """
+    Niestandardowy widok panelu administratora (admin.html).
+    """
+    return render(request, 'api/admin.html')
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from api.routers import ResilienceRouter
+
+class ToggleSimulateView(APIView):
+    permission_classes = []
+    
+    def post(self, request):
+        data = request.data
+        target = data.get('target')
+        
+        if target == 'slave':
+            ResilienceRouter.simulate_slave_down = not ResilienceRouter.simulate_slave_down
+        elif target == 'master':
+            ResilienceRouter.simulate_master_down = not ResilienceRouter.simulate_master_down
+            
+        return Response({
+            'success': True,
+            'master_down': ResilienceRouter.simulate_master_down,
+            'slave_down': ResilienceRouter.simulate_slave_down
+        })
+
+class GetQueryLogsView(APIView):
+    permission_classes = []
+    
+    def get(self, request):
+        return Response({
+            'queries': ResilienceRouter.query_log,
+            'master_down': ResilienceRouter.simulate_master_down,
+            'slave_down': ResilienceRouter.simulate_slave_down
+        })

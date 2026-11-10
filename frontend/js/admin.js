@@ -372,7 +372,7 @@ async function deleteProduct(productId) {
     }
 }
 
-// Obsługa formularza produktu
+// Obsługa formularza produktu (Poprawiona dla zdjęć!)
 async function handleProductSubmit(e) {
     e.preventDefault();
     
@@ -395,27 +395,36 @@ async function handleProductSubmit(e) {
     
     console.log('Rozmiary:', rozmiaryData);
     
-    // Przygotuj dane JSON
-    const productData = {
-        nazwa: document.getElementById('productNazwa').value,
-        kategoria: category,
-        cenaBrutto: parseFloat(document.getElementById('productCena').value),
-        kolor: document.getElementById('productKolor').value,
-        opis: document.getElementById('productOpis').value,
-        rozmiary_data: rozmiaryData
-    };
+    // Przygotuj dane Używamy FormData zamiast zwykłego obiektu JSON
+    const formData = new FormData();
+    formData.append('nazwa', document.getElementById('productNazwa').value);
+    formData.append('kategoria', category);
+    formData.append('cenaBrutto', document.getElementById('productCena').value);
+    formData.append('kolor', document.getElementById('productKolor').value);
+    formData.append('opis', document.getElementById('productOpis').value);
     
-    console.log('Zapis produktu:', productId ? 'Edycja' : 'Dodawanie', productData);
+    // Tablice i obiekty (jak rozmiary) trzeba zamienić na string, gdy używamy FormData
+    formData.append('rozmiary_data', JSON.stringify(rozmiaryData));
+    
+    // Dodajemy plik zdjęcia TYLKO jeśli został wybrany 
+    // (żeby nie nadpisać pustym polem przy edycji produktu)
+    if (productFile) {
+        // Zwróć uwagę na nazwę 'zdjecie' - musi pasować do pola w Django!
+        formData.append('zdjecie', productFile); 
+    }
+    
+    console.log('Zapis produktu:', productId ? 'Edycja' : 'Dodawanie');
     
     try {
         const token = getAuthToken();
         const config = {
             method: productId ? 'PATCH' : 'POST',
             headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+                // UWAGA KRYTYCZNA: Przy wysyłaniu FormData NIE WOLNO ustawiać 'Content-Type'!
+                // Przeglądarka musi sama wygenerować nagłówek 'multipart/form-data; boundary=...'
             },
-            body: JSON.stringify(productData),
+            body: formData, // Wysyłamy fizyczną paczkę, a nie tekst JSON
         };
         
         const response = await fetch(`${API_BASE_URL}/produkty/${productId ? productId + '/' : ''}`, config);
@@ -658,13 +667,20 @@ async function loadUsers(statusFilter = '') {
                 </td>
                 <td>${new Date(user.dataRejestracji).toLocaleDateString('pl-PL')}</td>
                 <td class="actions">
-                    ${user.statusUzytkownika === 'aktywny' ? 
-                        `<button class="btn btn-sm btn-delete" onclick="blockUser(${user.id})">Zablokuj</button>` : 
-                        `<button class="btn btn-sm btn-edit" onclick="unblockUser(${user.id})">Odblokuj</button>`
+                    ${user.statusUzytkownika === 'usunięty' ? 
+                        // Jeśli jest usunięty, pokazujemy tylko tekst
+                        `<span style="color: #e74c3c; font-weight: bold;">Konto usunięte</span>` : 
+                        
+                        // Jeśli NIE JEST usunięty, pokazujemy standardowe przyciski
+                        `${user.statusUzytkownika === 'aktywny' ? 
+                            `<button class="btn btn-sm btn-delete" onclick="blockUser(${user.id})">Zablokuj</button>` : 
+                            `<button class="btn btn-sm btn-edit" onclick="unblockUser(${user.id})">Odblokuj</button>`
+                        }
+                        <button class="btn btn-sm btn-delete" style="background-color: #e74c3c; margin-left: 5px;" onclick="removeUser(${user.id})">Usuń</button>`
                     }
                 </td>
             </tr>
-        `).join('');
+        `).join(''); // <-- TUTAJ BRAKOWAŁO ZAMKNIĘCIA
     } catch (error) {
         showToast('Nie udało się załadować użytkowników', 'error');
     }
@@ -693,6 +709,7 @@ async function unblockUser(userId) {
 }
 
 // Opinie
+// Opinie
 async function loadOpinions() {
     try {
         const opinions = await adminGetOpinions();
@@ -708,16 +725,17 @@ async function loadOpinions() {
         tbody.innerHTML = opinions.map(opinia => `
             <tr>
                 <td>${opinia.id_opinia}</td>
-                <td>${opinia.produkt_nazwa || 'Produkt #' + opinia.id_produkt}</td>
-                <td>${opinia.uzytkownik_imie} ${opinia.uzytkownik_nazwisko?.charAt(0) || ''}.</td>
-                <td>${'⭐'.repeat(opinia.ocena)}</td>
-                <td>${opinia.komentarz || '-'}</td>
+                <td>${opinia.produkt_nazwa || '-'}</td>
+                <td>${opinia.uzytkownik_imie || '-'} ${opinia.uzytkownik_nazwisko || '-'}</td>
+                <td>${opinia.ocena}/5</td>
+                <td>${opinia.komentarz}</td>
                 <td>${new Date(opinia.data).toLocaleDateString('pl-PL')}</td>
                 <td class="actions">
                     <button class="btn btn-sm btn-delete" onclick="deleteOpinion(${opinia.id_opinia})">Usuń</button>
                 </td>
             </tr>
-        `).join('');
+        `).join(''); // <-- TUTAJ TEŻ BRAKOWAŁO ZAMKNIĘCIA
+        
     } catch (error) {
         showToast('Nie udało się załadować opinii', 'error');
     }
@@ -797,9 +815,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+async function removeUser(userId) {
+    if (!confirm('Czy na pewno chcesz usunąć to konto? Użytkownik straci do niego dostęp, ale jego zamówienia pozostaną w systemie.')) return;
+    
+    try {
+        await adminDeleteUser(userId);
+        showToast('Status zmieniony na "usunięty"', 'success');
+        loadUsers(currentUserFilter); // Odśwież listę
+    } catch (error) {
+        showToast(error.message || 'Nie udało się zmienić statusu', 'error');
+    }
+}
+
 // Udostępnij funkcje globalnie
 window.loadUsers = loadUsers;
 window.loadOpinions = loadOpinions;
 window.blockUser = blockUser;
 window.unblockUser = unblockUser;
 window.deleteOpinion = deleteOpinion;
+window.removeUser = removeUser;

@@ -21,10 +21,8 @@ function logoutUser() {
     window.location.reload();
 }
 
-// API request helper - NAPRAWIONA STRUKTURA
 async function apiRequest(endpoint, options = {}) {
     const token = getAuthToken();
-    
     const config = {
         ...options,
         headers: {
@@ -33,30 +31,74 @@ async function apiRequest(endpoint, options = {}) {
             ...options.headers,
         },
     };
-    
+
     try {
         const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-        
-        // Handle token refresh
+
         if (response.status === 401 && getRefreshToken()) {
             const refreshed = await refreshToken();
             if (refreshed) {
                 const newToken = getAuthToken();
                 config.headers['Authorization'] = `Bearer ${newToken}`;
-                return await fetch(`${API_BASE_URL}${endpoint}`, config);
+                const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, config);
+                return retryResponse.status === 204 ? {} : await retryResponse.json();
             }
         }
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.detail || data.message || 'Wystąpił błąd');
+
+        if (response.status === 204 || response.headers.get("content-length") === "0") {
+            return {};
         }
-        
+
+        const text = await response.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (err) {
+            console.error('Odpowiedź serwera nie jest JSON-em:', text);
+            throw new Error(`Błąd serwera (${response.status})`);
+        }
+
+        if (!response.ok) {
+            // Wyciągamy szczegółowy błąd z Django REST Framework
+            let errorMsg = data.detail || data.message || data.error;
+            if (!errorMsg && typeof data === 'object') {
+                const firstKey = Object.keys(data)[0];
+                const firstErr = Array.isArray(data[firstKey]) ? data[firstKey][0] : data[firstKey];
+                errorMsg = `${firstKey}: ${firstErr}`;
+            }
+            throw new Error(errorMsg || 'Błąd API');
+        }
         return data;
     } catch (error) {
         console.error('API Error:', error);
         throw error;
+    }
+}
+
+// API request helper - NAPRAWIONA STRUKTURA
+async function handleReset(e) {
+    e.preventDefault();
+    const submitButton = document.getElementById('submit-btn'); // sprawdź czy masz takie ID
+    
+    submitButton.innerText = 'Wysyłam...';
+    submitButton.disabled = true;
+
+    try {
+        const email = document.getElementById('email').value;
+        await apiRequest('/auth/password-reset-request/', {
+            method: 'POST',
+            body: JSON.stringify({ email })
+        });
+
+        alert('Link wysłany! Sprawdź terminal.');
+        window.location.href = 'login.html'; // Automatyczne przekierowanie!
+
+    } catch (error) {
+        alert('Błąd: ' + error.message);
+    } finally {
+        // TO SIĘ WYKONA ZAWSZE - przycisk "odżyje"
+        submitButton.innerText = 'Wyślij link';
+        submitButton.disabled = false;
     }
 }
 
@@ -105,6 +147,31 @@ async function loginUser(email, password) {
 
 async function getUserProfile() {
     return await apiRequest('/auth/profile/');
+}
+
+// Auth API - Resetowanie hasła
+async function requestPasswordReset(email) {
+    return await apiRequest('/auth/password-reset-request/', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+    });
+}
+
+async function confirmPasswordReset(uid, token, password) {
+    return await apiRequest('/auth/password-reset-confirm/', {
+        method: 'POST',
+        body: JSON.stringify({ uid, token, password }),
+    });
+}
+
+async function changePassword(oldPassword, newPassword) {
+    return await apiRequest('/auth/password-change/', {
+        method: 'POST',
+        body: JSON.stringify({
+            old_password: oldPassword,
+            new_password: newPassword
+        }),
+    });
 }
 
 // Products API
@@ -173,7 +240,7 @@ async function getOrderDetails(orderId) {
 
 // Opinions API
 async function getProductOpinions(produktId) {
-    return await apiRequest(`/opinie/?id_product=${produktId}`);
+    return await apiRequest(`/opinie/?id_produkt=${produktId}`);
 }
 
 async function addOpinionApi(produktId, ocena, komentarz) {
@@ -253,6 +320,12 @@ async function adminUnblockUser(userId) {
     });
 }
 
+async function adminDeleteUser(userId) {
+    return await apiRequest(`/admin/uzytkownicy/${userId}/usun/`, { 
+        method: 'POST' 
+    });
+}
+
 // Admin - Opinions API
 async function adminGetOpinions() {
     return await apiRequest('/admin/opinie/');
@@ -263,3 +336,4 @@ async function adminDeleteOpinion(opinionId) {
         method: 'POST',
     });
 }
+

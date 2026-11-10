@@ -1,0 +1,7 @@
+# Cron job dla backupu bazy danych NaRejonie
+# Uruchamiany codziennie o 2:00
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+0 2 * * * cortexai cd /home/cortexai/CortexAI/moj_projekt/backend && ./backups/daily_backup.sh >> /var/log/narejonie-backup.log 2>&1

@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  mysql-master:
+    image: mysql:8.0
+    container_name: mysql-master
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: narejonie
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./backend/mysql/master/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      - mysql-master-data:/var/lib/mysql
+    command: --server-id=1 --log-bin=mysql-bin --binlog-format=ROW --gtid-mode=ON --enforce-gtid-consistency=true
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pProjekt2026!"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mysql-network
+
+  mysql-slave:
+    image: mysql:8.0
+    container_name: mysql-slave
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: narejonie
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./backend/mysql/slave/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      - mysql-slave-data:/var/lib/mysql
+    command: --server-id=2 --relay-log=mysql-relay-bin --read-only=1 --gtid-mode=ON --enforce-gtid-consistency=true
+    depends_on:
+      mysql-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pProjekt2026!"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mysql-network
+
+volumes:
+  mysql-master-data:
+  mysql-slave-data:
+
+networks:
+  mysql-network:
+    driver: bridge

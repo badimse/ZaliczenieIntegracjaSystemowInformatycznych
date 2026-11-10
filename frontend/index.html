@@ -6,37 +6,66 @@
     <title>Na Rejonie - Sklep Odzieżowy</title>
     <link rel="stylesheet" href="css/style.css">
 
+    <style>
+
+</style>
+
     <link rel="icon" type="image/png" href="favicon.png">
 </head>
 <body>
     <!-- Nawigacja -->
     <nav class="navbar">
-        <div class="nav-container">
-            <a href="#" class="logo">
-                <img src="img/logo.png" alt="Na Rejonie Logo" class="logo-img">
-            </a>
-            <div class="nav-right">
-                <div class="search-box">
-                    <input type="text" id="searchInput" placeholder="Szukaj produktów...">
-                    <button class="search-btn">🔍</button>
-                </div>
-                <div class="nav-actions">
-                    <button class="cart-btn" id="cartBtn">
-                        🛒 Koszyk <span id="cartCount" class="cart-count">0</span>
-                    </button>
-                    <div class="user-menu" id="userMenu" style="display: none;">
-                        <span class="user-name" id="userName"></span>
-                        <button id="ordersBtn">Zamówienia</button>
-                        <button id="logoutBtn">Wyloguj</button>
+    <div class="nav-container">
+        <a href="#" class="logo">
+            <img src="img/logo.png" alt="Na Rejonie Logo" class="logo-img">
+        </a>
+        
+        <div class="nav-right">
+            <!-- Wyszukiwarka -->
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Szukaj produktów...">
+                <button class="search-btn">🔍</button>
+            </div>
+
+            <!-- Koszyk (Poprawnie opakowany!) -->
+            <div class="cart-wrapper" style="position: relative; display: inline-block;">
+                <button class="cart-btn" id="cartBtn">
+                    🛒 Koszyk <span id="cartCount" class="cart-count">0</span>
+                </button>
+
+                <div id="cartDropdown" style="display: none; position: absolute; top: 120%; right: 0; width: 300px; background: white; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); z-index: 10000; padding: 15px; border: 1px solid #eee;">
+                    <h4 style="margin: 0; color: #333; font-size: 16px;">Dodano do koszyka!</h4>
+                    <div id="cartDropdownItems" style="margin: 10px 0;"></div>
+                    
+                    <div id="cartDropdownFooter" style="border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;">
+                        <div style="display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 10px;">
+                            <span>Suma:</span>
+                            <span id="cartDropdownTotal">0.00 zł</span>
+                        </div>
+                        <button onclick="document.getElementById('cartDropdown').style.display='none'; document.getElementById('cartBtn').click();" 
+                                style="width: 100%; background: #000; color: #fff; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold;">
+                            Zobacz pełny koszyk
+                        </button>
                     </div>
-                    <button class="login-btn" id="loginBtn">Zaloguj</button>
-                    <button class="login-btn register-btn" id="registerBtn">Zarejestruj</button>
-                    <a href="admin.html" class="login-btn" id="adminLink" style="display: none;">Panel Admina</a>
-                </div>
                 </div>
             </div>
-        </div>
-    </nav>
+
+            <!-- Menu Użytkownika -->
+            <div class="user-menu-wrapper" style="display: flex; align-items: center; gap: 10px;">
+                <div class="user-menu" id="userMenu" style="display: none;">
+                    <span class="user-name" id="userName"></span>                      
+                    <button id="ordersBtn">Zamówienia</button>
+                    <button id="openPasswordModal" type="button" onclick="window.handleOpenPasswordModal()">Zmień hasło</button>
+                    <button id="logoutBtn">Wyloguj</button>
+                </div>
+                
+                <button class="login-btn" id="loginBtn">Zaloguj</button>
+                <button class="login-btn register-btn" id="registerBtn">Zarejestruj</button>
+                <a href="/moj-admin/" class="login-btn" id="adminLink" style="display: none;">Panel Admina</a>
+            </div>
+        </div> <!-- Zamknięcie nav-right -->
+    </div> <!-- Zamknięcie nav-container -->
+</nav>
 
     <!-- Hero Section -->
     <section class="hero">
@@ -84,6 +113,39 @@
         </div>
     </section>
 
+    <!--Zmiana hasła-->    
+        <div class="modal" id="passwordModal" style="display: none; align-items: center; justify-content: center; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 9999;">
+    <div class="modal-overlay" onmousedown="document.getElementById('passwordModal').style.display='none'; document.getElementById('passwordModal').classList.remove('active');" style="background: rgba(0,0,0,0.7); position: absolute; width: 100%; height: 100%; cursor: pointer;"></div>
+    
+    <div class="modal-content" style="max-width: 400px; width: 90%; padding: 40px; position: relative; background: white; border-radius: 15px; text-align: left; box-sizing: border-box; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+        
+        <button type="button" 
+                onmousedown="document.getElementById('passwordModal').style.display='none'; document.getElementById('passwordModal').classList.remove('active');" 
+                style="position: absolute; top: 15px; right: 15px; background: transparent; color: #333; border: none; font-size: 28px; cursor: pointer; width: 45px; height: 45px; border-radius: 50%; display: flex; align-items: center; justify-content: center; z-index: 9999999 !important;">
+            &times;
+        </button>
+
+        <h2 style="text-align: center; margin-bottom: 25px; color: #1a1a1a;">Zmiana hasła</h2>
+        
+        <form id="changePasswordForm" style="width: 100%;">
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #333;">Obecne hasło</label>
+                <input type="password" id="oldPassword" required style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box;">
+            </div>
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #333;">Nowe hasło</label>
+                <input type="password" id="newPassword" required style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box;">
+            </div>
+            <div style="margin-bottom: 25px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #333;">Powtórz nowe hasło</label>
+                <input type="password" id="confirmNewPassword" required style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box;">
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; font-weight: bold; background: #000; color: white; border: none; border-radius: 8px; cursor: pointer;">Zaktualizuj hasło</button>
+        </form>
+    </div> 
+</div>
+
+
     <!-- Footer -->
     <footer class="footer">
         <div class="footer-content">
@@ -125,6 +187,9 @@
                     <label for="loginPassword">Hasło</label>
                     <input type="password" id="loginPassword" required>
                 </div>
+                <div class="form-group" style="text-align: right; margin-top: -10px; margin-bottom: 15px;">
+                    <a href="forgot-password.html" style="font-size: 0.9rem; color: #4a90e2; text-decoration: none;">Zapomniałeś hasła?</a>
+                </div>
                 <button type="submit" class="btn btn-primary">Zaloguj</button>
             </form>
             <p class="modal-footer">Nie masz konta? <a href="#" class="register-trigger">Zarejestruj się</a></p>
@@ -163,7 +228,12 @@
                 </div>
                 <button type="submit" class="btn btn-primary">Zarejestruj</button>
             </form>
-            <p class="modal-footer">Masz już konto? <a href="#" class="login-trigger">Zaloguj się</a></p>
+            <p class="modal-footer">
+            Masz już konto? 
+            <a href="#" class="login-trigger" onclick="document.getElementById('registerModal').style.display='none'; document.getElementById('registerModal').classList.remove('active'); document.getElementById('loginModal').style.display='flex'; document.getElementById('loginModal').classList.add('active'); return false;">
+        Zaloguj się
+    </a>
+</p>
         </div>
     </div>
 
@@ -181,7 +251,7 @@
     <div class="modal" id="checkoutModal">
         <div class="modal-overlay"></div>
         <div class="modal-content">
-            <button class="modal-close" onclick="closeModals()">&times;</button>
+            <button class="modal-close" type="button" onclick="window.closeModals()" style="z-index: 9999; cursor: pointer;">&times;</button>
             <h2>Dane dostawy</h2>
             <form id="checkoutForm">
                 <div class="form-row">
@@ -262,11 +332,67 @@
         </div>
     </div>
 
+
+
     <!-- Toast Notifications -->
     <div id="toastContainer"></div>
 
     <script src="js/api.js"></script>
     <script src="js/auth.js"></script>
     <script src="js/app.js"></script>
+
+    <script>
+    // FUNKCJA OTWIERANIA MODALU HASŁA
+    window.handleOpenPasswordModal = function() {
+        const modal = document.getElementById('passwordModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            modal.classList.add('active');
+        }
+    };
+
+    // UNIWERSALNA FUNKCJA ZAMYKANIA WSZYSTKIEGO
+    window.closeModals = function(e) {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        // Usuwamy klasę active ze wszystkich modali i czyścimy inline display
+        document.querySelectorAll('.modal').forEach(m => {
+            m.classList.remove('active');
+            if (m.id === 'passwordModal') {
+                m.style.display = 'none';
+            } else {
+                m.style.display = ''; // Pozwala klasie .active z CSS znowu działać!
+            }
+        });
+    };
+
+    // REJESTRACJA ZDARZEŃ (Bezpieczna)
+    document.addEventListener('DOMContentLoaded', function() {
+        // Obsługa przycisku X w modalu hasła przez ID
+        const xBtn = document.getElementById('closePasswordModalBtn');
+        if (xBtn) {
+            xBtn.addEventListener('click', function(e) {
+                e.stopPropagation(); // Powstrzymuje błędy bąbelkowania
+                window.closeModals();
+            });
+        }
+
+        // Obsługa ESC
+        window.addEventListener('keydown', function(e) {
+            if (e.key === "Escape") window.closeModals();
+        });
+
+        // Obsługa kliknięcia w tło (overlay)
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('modal-overlay')) {
+                window.closeModals();
+            }
+        });
+    });
+</script>
+
 </body>
 </html>

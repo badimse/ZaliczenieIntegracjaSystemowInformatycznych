@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Symulator Master-Slave & Live Query Monitor</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h1 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        .card { background: #fafbfc; border: 1px solid #e1e4e8; padding: 20px; border-radius: 8px; text-align: center; }
+        .card h3 { margin-top: 0; }
+        .status-badge { display: inline-block; padding: 6px 12px; border-radius: 20px; font-weight: bold; color: white; margin-bottom: 15px; }
+        .active { background: #28a745; }
+        .down { background: #dc3545; }
+        button { padding: 10px 20px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; color: white; }
+        .btn-slave { background: #17a2b8; }
+        .btn-master { background: #ffc107; color: #333; }
+        .btn-down { background: #dc3545; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 10px; border-bottom: 1px solid #ddd; text-align: left; font-size: 14px; }
+        th { background: #f1f3f5; }
+        .badge-read { background: #e2f0d9; color: #385723; padding: 3px 8px; border-radius: 4px; font-weight: bold; }
+        .badge-write { background: #fce4d6; color: #c65911; padding: 3px 8px; border-radius: 4px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Symulator Architektury Master-Slave</h1>
+        <p>Ten panel pozwala symulować awarię węzłów i śledzić w czasie rzeczywistym, do której bazy trafiają zapytania z aplikacji.</p>
+
+        <div class="grid">
+            <!-- MASTER -->
+            <div class="card">
+                <h3>Baza MASTER (Zapis / Write)</h3>
+                <div id="masterStatus" class="status-badge active">STATUS: AKTYWNY</div><br>
+                <button class="btn-master" onclick="toggleSimulate('master')">Symuluj awarię Mastera</button>
+            </div>
+
+            <!-- SLAVE -->
+            <div class="card">
+                <h3>Baza SLAVE (Odczyt / Read)</h3>
+                <div id="slaveStatus" class="status-badge active">STATUS: AKTYWNY</div><br>
+                <button class="btn-slave" onclick="toggleSimulate('slave')">Symuluj awarię Slave'a</button>
+            </div>
+        </div>
+
+        <h2 style="margin-top: 40px;">Live Query Monitor (Podgląd ruchu zapytań)</h2>
+        <p style="font-size: 13px; color: #666;">Tabela odświeża się automatycznie co sekundę. Otwórz w drugiej karcie sklep, klikaj produkty lub składaj zamówienia, aby zobaczyć routing zapytań!</p>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Czas</th>
+                    <th>Typ Operacji</th>
+                    <th>Obsłużone przez bazę</th>
+                </tr>
+            </thead>
+            <tbody id="queryTable">
+                <tr><td colspan="3" style="text-align: center;">Ładowanie logów...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        function toggleSimulate(target) {
+            fetch('/api/monitoring/toggle/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ target: target })
+            })
+            .then(res => res.json())
+            .then(data => {
+                updateUI(data.master_down, data.slave_down);
+            });
+        }
+
+        function fetchLogs() {
+            fetch('/api/monitoring/logs/')
+            .then(res => res.json())
+            .then(data => {
+                updateUI(data.master_down, data.slave_down);
+                
+                const tbody = document.getElementById('queryTable');
+                if (data.queries.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="3" style="text-align: center;">Brak zapytań w buforze. Przejdź do sklepu i wykonaj akcję.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.queries.map(q => `
+                    <tr>
+                        <td>${q.time}</td>
+                        <td><span class="${q.type === 'READ' ? 'badge-read' : 'badge-write'}">${q.type}</span></td>
+                        <td><strong>${q.database}</strong></td>
+                    </tr>
+                `).join('');
+            });
+        }
+
+        function updateUI(masterDown, slaveDown) {
+            const mBadge = document.getElementById('masterStatus');
+            const sBadge = document.getElementById('slaveStatus');
+            
+            if (masterDown) {
+                mBadge.className = 'status-badge down';
+                mBadge.innerText = 'STATUS: AWARIA (DOWN)';
+            } else {
+                mBadge.className = 'status-badge active';
+                mBadge.innerText = 'STATUS: AKTYWNY';
+            }
+
+            if (slaveDown) {
+                sBadge.className = 'status-badge down';
+                sBadge.innerText = 'STATUS: AWARIA (FALLBACK DO MASTER)';
+            } else {
+                sBadge.className = 'status-badge active';
+                sBadge.innerText = 'STATUS: AKTYWNY';
+            }
+        }
+
+        // Odświeżaj logi co 1 sekundę
+        setInterval(fetchLogs, 1000);
+        fetchLogs();
+    </script>
+</body>
+</html>

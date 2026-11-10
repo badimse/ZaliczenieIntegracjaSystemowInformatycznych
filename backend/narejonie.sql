@@ -26,7 +26,7 @@ DROP TABLE IF EXISTS `administrator`;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `administrator` (
   `id_administrator` int NOT NULL AUTO_INCREMENT,
-  `id_uzytkownik` bigint NOT NULL,
+  `id_uzytkownik` int NOT NULL,
   PRIMARY KEY (`id_administrator`),
   UNIQUE KEY `id_uzytkownik` (`id_uzytkownik`),
   CONSTRAINT `administrator_id_uzytkownik_ea883360_fk_uzytkownik_id` FOREIGN KEY (`id_uzytkownik`) REFERENCES `uzytkownik` (`id`)
@@ -104,7 +104,7 @@ DROP TABLE IF EXISTS `auth_group_permissions`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `auth_group_permissions` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
+  `id` int NOT NULL AUTO_INCREMENT,
   `group_id` int NOT NULL,
   `permission_id` int NOT NULL,
   PRIMARY KEY (`id`),
@@ -167,7 +167,7 @@ CREATE TABLE `django_admin_log` (
   `action_flag` smallint unsigned NOT NULL,
   `change_message` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
   `content_type_id` int DEFAULT NULL,
-  `user_id` bigint NOT NULL,
+  `user_id` int NOT NULL,
   PRIMARY KEY (`id`),
   KEY `django_admin_log_content_type_id_c4bce8eb_fk_django_co` (`content_type_id`),
   KEY `django_admin_log_user_id_c564eba6_fk_uzytkownik_id` (`user_id`),
@@ -220,7 +220,7 @@ DROP TABLE IF EXISTS `django_migrations`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `django_migrations` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
+  `id` int NOT NULL AUTO_INCREMENT,
   `app` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `applied` datetime(6) NOT NULL,
@@ -274,7 +274,7 @@ CREATE TABLE `koszyk` (
   `id_koszyk` int NOT NULL AUTO_INCREMENT,
   `dataUtworzenia` datetime(6) NOT NULL,
   `rezerwacjaDo` datetime(6) DEFAULT NULL,
-  `id_uzytkownik` bigint NOT NULL,
+  `id_uzytkownik` int NOT NULL,
   PRIMARY KEY (`id_koszyk`),
   UNIQUE KEY `id_uzytkownik` (`id_uzytkownik`),
   CONSTRAINT `koszyk_id_uzytkownik_b8bc1de7_fk_uzytkownik_id` FOREIGN KEY (`id_uzytkownik`) REFERENCES `uzytkownik` (`id`)
@@ -303,7 +303,7 @@ CREATE TABLE `opinia` (
   `ocena` int NOT NULL,
   `komentarz` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
   `data` datetime(6) NOT NULL,
-  `id_uzytkownik` bigint NOT NULL,
+  `id_uzytkownik` int NOT NULL,
   `id_produkt` int NOT NULL,
   PRIMARY KEY (`id_opinia`),
   KEY `opinia_id_uzytkownik_cd175bc8_fk_uzytkownik_id` (`id_uzytkownik`),
@@ -336,7 +336,7 @@ CREATE TABLE `platnosc` (
   `kwota` decimal(10,2) NOT NULL,
   `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
   `znacznikCzasu` datetime(6) NOT NULL,
-  `id_uzytkownik` bigint NOT NULL,
+  `id_uzytkownik` int NOT NULL,
   `id_zamowienie` int NOT NULL,
   PRIMARY KEY (`id_platnosc`),
   KEY `platnosc_id_uzytkownik_0a8337de_fk_uzytkownik_id` (`id_uzytkownik`),
@@ -483,7 +483,7 @@ DROP TABLE IF EXISTS `uzytkownik`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `uzytkownik` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
+  `id` int NOT NULL AUTO_INCREMENT,
   `password` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
   `last_login` datetime(6) DEFAULT NULL,
   `is_superuser` tinyint(1) NOT NULL,
@@ -522,8 +522,8 @@ DROP TABLE IF EXISTS `uzytkownik_groups`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `uzytkownik_groups` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
-  `user_id` bigint NOT NULL,
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
   `group_id` int NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uzytkownik_groups_user_id_group_id_ac1c99ce_uniq` (`user_id`,`group_id`),
@@ -550,8 +550,8 @@ DROP TABLE IF EXISTS `uzytkownik_user_permissions`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `uzytkownik_user_permissions` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
-  `user_id` bigint NOT NULL,
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
   `permission_id` int NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uzytkownik_user_permissions_user_id_permission_id_32f04696_uniq` (`user_id`,`permission_id`),
@@ -582,7 +582,7 @@ CREATE TABLE `zamowienie` (
   `dataZlozenia` datetime(6) NOT NULL,
   `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
   `kwota` decimal(10,2) NOT NULL,
-  `id_uzytkownik` bigint NOT NULL,
+  `id_uzytkownik` int NOT NULL,
   PRIMARY KEY (`id_zamowienie`),
   KEY `zamowienie_id_uzytkownik_d2799412_fk_uzytkownik_id` (`id_uzytkownik`),
   CONSTRAINT `zamowienie_id_uzytkownik_d2799412_fk_uzytkownik_id` FOREIGN KEY (`id_uzytkownik`) REFERENCES `uzytkownik` (`id`)

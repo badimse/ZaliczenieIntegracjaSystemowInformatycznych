@@ -27,7 +27,7 @@ button {
 .navbar {
     background-color: #1a1a1a;
     color: white;
-    padding: 0.3rem 2rem;
+    padding: 0.1rem 2rem;
     position: sticky;
     top: 0;
     z-index: 1000;
@@ -51,7 +51,7 @@ button {
 }
 
 .logo-img {
-    height: 325px;
+    height: 100px;
     width: auto;
     object-fit: contain;
 }
@@ -496,40 +496,45 @@ button {
 
 /* Modal */
 .modal {
-    display: none;
+    display: none; 
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    z-index: 2000;
+    z-index: 3000; /* Wyższy priorytet */
+    justify-content: center; /* Centrowanie w poziomie */
+    align-items: center;     /* Centrowanie w pionie */
 }
 
 .modal.active {
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    display: flex !important;
 }
 
+/* CIEMNE TŁO */
 .modal-overlay {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0,0,0,0.7);
+    background: rgba(0, 0, 0, 0.7);
 }
 
+/* 1. Poprawiony modal (dodane poprawne 'hidden' z dwoma 'd') */
+/* BIAŁE OKIENKO */
 .modal-content {
     position: relative;
     background: white;
-    padding: 2rem;
-    border-radius: 15px;
-    max-width: 500px;
-    width: 90%;
+    padding: 20px;
+    border-radius: 12px;
+    width: 90%;          /* Responsywność */
+    max-width: 450px;    /* Stała, elegancka szerokość */
     max-height: 90vh;
-    overflow-y: auto;
-    z-index: 2001;
+    overflow: hidden;    /* Zatrzymuje wszystko, co wychodzi poza zaokrąglone rogi (teraz poprawnie napisane) */
+    z-index: 3001;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    text-align: left;    /* Resetujemy wyrównanie dla zawartości */
 }
 
 .modal-large {
@@ -538,17 +543,45 @@ button {
 
 .modal-close {
     position: absolute;
-    top: 1rem;
-    right: 1rem;
-    background: transparent;
-    font-size: 1.5rem;
-    color: #666;
+    top: 15px;
+    right: 15px;
+    background: none;
+    border: none;
+    font-size: 30px; /* Większy krzyżyk */
+    font-weight: bold;
+    color: #333;
+    cursor: pointer;
+    padding: 10px;   /* Większe pole do kliknięcia */
+    line-height: 1;
+    z-index: 10;     /* Żeby na pewno był nad tekstem */
 }
 
+.modal-close:hover {
+    color: #ff6b35; /* Zmieni kolor po najechaniu, sprawdzisz czy działa */
+}
 .modal-content h2 {
     color: #1a1a1a;
     margin-bottom: 1.5rem;
-    text-align: center;
+    text-align: center; /* Napis będzie na środku okienka */
+    font-size: 1.8rem;
+}
+
+.opinions-scroll-container {
+    max-height: 250px; 
+    overflow-y: auto;  
+    padding-right: 10px;
+    margin-top: 15px;
+    border-top: 1px solid #eee;
+    padding-top: 15px;
+}
+
+.opinions-scroll-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.opinions-scroll-container::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 10px;
 }
 
 /* Forms */
@@ -591,8 +624,15 @@ button {
 
 .modal-content form {
     width: 100%;
-    max-width: 100%;
+    /* Możesz zostawić to 80% jeśli chcesz węższy formularz, ale 100% wygląda tu naturalniej */
+    /* max-width: 80%; */ 
     margin: 0 auto;
+    
+    /* TO JEST KLUCZOWE - suwak przenosimy do formularza */
+    /* 90vh minus marginesy/paddingi z .modal-content, żeby formularz nie wyszedł dołem */
+    max-height: calc(90vh - 80px); 
+    overflow-y: auto; /* auto sprawi, że suwak pokaże się TYLKO gdy braknie miejsca */
+    padding-right: 5px; /* Minimalny odstęp od suwaka, żeby tekst do niego nie dotykał */
 }
 
 .modal-content .form-group {
@@ -923,4 +963,46 @@ button {
         flex-direction: column;
         align-items: center;
     }
+}
+
+/* Styl dla modala zmiany hasła - naprawa wyrównania */
+#passwordModal .form-group {
+    width: 100%;
+    text-align: left; /* Etykiety do lewej, ale kontener na środku */
+    margin-bottom: 15px;
+}
+
+#passwordModal .form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+}
+
+#passwordModal .modal-content {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important; /* To rozciągnie pola równo do brzegów */
+    padding: 30px !important;
+    box-sizing: border-box !important;
+}
+
+#passwordModal input {
+    width: 100% !important;
+    box-sizing: border-box !important; /* To klucz do symetrii! */
+    margin-bottom: 10px;
+}
+
+#passwordModal .modal-close {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #eee; /* Lekkie tło, żebyś widział gdzie klikasz - potem możesz usunąć */
+    border-radius: 50%;
+    cursor: pointer;
+    z-index: 100;
 }

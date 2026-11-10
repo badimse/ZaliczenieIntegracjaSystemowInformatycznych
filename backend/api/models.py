@@ -160,6 +160,7 @@ class PozycjaZamowienia(models.Model):
     id_pozycjazamowienia = models.AutoField(primary_key=True)
     id_zamowienie = models.ForeignKey(Zamowienie, on_delete=models.CASCADE, db_column='id_zamowienie', related_name='pozycje')
     id_produkt = models.ForeignKey(Produkt, on_delete=models.CASCADE, db_column='id_produkt')
+    rozmiar = models.CharField(max_length=10, blank=True, null=True)
     ilosc = models.IntegerField(default=1)
     cenaJednostkowa = models.DecimalField(max_digits=10, decimal_places=2)
     

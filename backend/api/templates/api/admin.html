@@ -1,18 +1,28 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="pl">
 <head>
+    <!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-MQX13KV79Y"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-MQX13KV79Y');
+</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Panel Administratora - Na Rejonie</title>
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/admin.css">
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/admin.css">
 </head>
 <body>
     <!-- Nawigacja -->
     <nav class="navbar navbar-admin">
         <div class="nav-container">
             <a href="index.html" class="logo">
-                <img src="img/logo.png" alt="Na Rejonie Logo" class="logo-img">
+                <img src="/img/logo.png" alt="Na Rejonie Logo" class="logo-img">
             </a>
             <span class="admin-badge">Panel Administratora</span>
             <div class="nav-actions">
@@ -285,7 +295,7 @@
     <!-- Toast Notifications -->
     <div id="toastContainer"></div>
 
-    <script src="js/api.js"></script>
-    <script src="js/admin.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/admin.js"></script>
 </body>
 </html>

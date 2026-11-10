@@ -61,13 +61,25 @@ class RozmiarProduktuSerializer(serializers.ModelSerializer):
         model = RozmiarProduktu
         fields = ['id_rozmiar', 'rozmiar', 'stanMagazynowy']
 
+class OpiniaSerializer(serializers.ModelSerializer):
+    """Serializator opinii."""
+    uzytkownik_imie = serializers.CharField(source='id_uzytkownik.imie', read_only=True)
+    uzytkownik_nazwisko = serializers.CharField(source='id_uzytkownik.nazwisko', read_only=True)
+    produkt_nazwa = serializers.CharField(source='id_produkt.nazwa', read_only=True)
+    
+    class Meta:
+        model = Opinia
+        fields = ['id_opinia', 'id_produkt', 'id_uzytkownik', 'uzytkownik_imie', 
+                  'uzytkownik_nazwisko', 'produkt_nazwa', 'ocena', 'komentarz', 'data']
+        read_only_fields = ['id_opinia', 'id_uzytkownik', 'data']
 
 class ProduktSerializer(serializers.ModelSerializer):
     """Serializator produktu."""
     zdjecie_url = serializers.SerializerMethodField()
     rozmiary = RozmiarProduktuSerializer(many=True, read_only=True)
     dostepne_rozmiary = serializers.SerializerMethodField()
-    
+    opinie = OpiniaSerializer(many=True, read_only=True, source='opinia_set')
+
     # Pola do tworzenia/edycji - obsługa wielu rozmiarów
     rozmiary_data = serializers.JSONField(write_only=True, required=False, default=[])
     
@@ -75,7 +87,7 @@ class ProduktSerializer(serializers.ModelSerializer):
         model = Produkt
         fields = ['id_produkt', 'nazwa', 'opis', 'cenaBrutto', 'kategoria', 
                   'kolor', 'zdjecie', 'zdjecie_url', 'rozmiary', 'dostepne_rozmiary',
-                  'rozmiary_data']
+                  'rozmiary_data','opinie']
     
     def get_zdjecie_url(self, obj):
         if obj.zdjecie:
@@ -193,19 +205,6 @@ class ZamowienieSerializer(serializers.ModelSerializer):
     def get_czy_zwrot_zgloszony(self, obj):
         from .models import Zwrot
         return Zwrot.objects.filter(id_zamowienie=obj).exists()
-
-
-class OpiniaSerializer(serializers.ModelSerializer):
-    """Serializator opinii."""
-    uzytkownik_imie = serializers.CharField(source='id_uzytkownik.imie', read_only=True)
-    uzytkownik_nazwisko = serializers.CharField(source='id_uzytkownik.nazwisko', read_only=True)
-    produkt_nazwa = serializers.CharField(source='id_produkt.nazwa', read_only=True)
-    
-    class Meta:
-        model = Opinia
-        fields = ['id_opinia', 'id_produkt', 'id_uzytkownik', 'uzytkownik_imie', 
-                  'uzytkownik_nazwisko', 'produkt_nazwa', 'ocena', 'komentarz', 'data']
-        read_only_fields = ['id_opinia', 'id_uzytkownik', 'data']
 
 
 class PlatnoscSerializer(serializers.ModelSerializer):
